@@ -1,3 +1,7 @@
-Simple glossary trainer mainly driven by JavaScript.
+Possibly the first web application ever completely written in Haskell; train
+your hiragana prowess by letting this simple application serve you with
+questions to answer and keep track of what you get wrong - or add your own
+dictionaries to the dicts subdirectory and train something else.
 
-Licensed by GNU GPL and the License will be included in a future version ;P
+The main point of this rewrite is to test the reactive standard library of
+http://ekblad.cc/haste. Turns out, it's crap and will be completely rewritten.

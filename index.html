@@ -10,10 +10,7 @@
        type="text/javascript" 
        src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js">
     </script>
-    <script type="text/javascript" src="assets/js/exquisitioner.js"></script>
-    <script type="text/javascript" src="assets/js/ListLoader.js"></script>
-    <script type="text/javascript" src="assets/js/behaviours.js"></script>
-    <script type="text/javascript" src="assets/js/ready.js"></script>
+    <script type="text/javascript" src="glosie.js"></script>
 
 
     <link type="text/css" rel="stylesheet" href="style.css" />
@@ -24,7 +21,8 @@
     <div id="masterWrapper">
       <div id="menu">
 	<h1>Glosie</h1>
-	<select id="dictList"></select>
+	<select id="dictList">
+        </select>
       </div>
 
       <div id="test">
@@ -41,8 +39,9 @@
       </div>
       <div id="log">
 	<p id="statistics">
-	  
+	  You seem to have some trouble with the following items:
 	</p>
+        <p id="problems"></p>
       </div>
     </div>
   </body>
