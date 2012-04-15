@@ -26,10 +26,9 @@ main = do
   let dictpath = ("dicts/"++) <$> (dictName `union` ("hiragana.lst" <$ start))
   dict <- fmap mkDict <$> ajaxSig dictpath (pure [])
 
-  qaIndex <- async
-               $   (\d p -> randomIO (0, length d-1) >>= write p)
-               <$> dict
-               <*  newQ
+  let newRandom d p = randomIO (0, length d-1) >>= write p
+  qaIndex <- async (| newRandom (dict <* newQ) |)
+
   let qAndA = (| dict !! qaIndex |)
       isGuess = (False <$ qAndA) `union` (True <$ answer)
       correct = fmap fst
@@ -40,6 +39,10 @@ main = do
       triesLeft = filterS (>= 0) $ accumS 3 (updateTries <$> resetTries)
       updateTries True = const (3 :: Int)
       updateTries _    = subtract 1
+
+      updateTotalTries True (r,tot)  = (r+1,tot+1)
+      updateTotalTries False (r,tot) = (r,tot+1)
+      tries = accumS (0,0::Double) (| updateTotalTries correct |)
 
       problems = accumS [] (| addProblem qAndA triesLeft isGuess answer |)
       addProblem _ 3 _ _ =
@@ -58,9 +61,11 @@ main = do
   domObj "hint.innerHTML" << formatTries <$> triesLeft
   domObj "answer.value" << "" <$ answer
   domObj "problems.innerHTML" << showList <$> visibleProbs
+  domObj "stats.innerHTML" << formatPerc <$> tries
   pnewQ << () <$ filterS id correct
   write pstart ()
   where
+    formatPerc (good,tot) = show_ (round_ $ (good/tot)*100) ++ " % correct"
     formatTries n = if n == 3 then "" else show n ++ " tries left"
     showList = concat
              . map
