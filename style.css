@@ -102,7 +102,7 @@ body {
 
 .correct {color: #0a0;}
 .wrong {color: #f00; font-size: 14pt;}
-.correctAfterFirstGuess {color: #aa0;}
+.correctAfterFirstGuess {color: #aa0; font-size: 14pt;}
 
 #statistics var {
     font-style: normal;

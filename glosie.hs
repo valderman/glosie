@@ -1,9 +1,10 @@
+{-# OPTIONS_GHC -F -pgmF she #-}
 module Main where
 import Control.Applicative
 import Haste
 import Haste.JSON
 import Haste.Reactive
-import Haste.Reactive.Ajax
+import FRP.Fursuit.Async (async)
 
 mkDict :: String -> [(String, String)]
 mkDict = map (\str -> let (v,k) = span (/=':') str in (drop 1 k, v)) . lines
@@ -17,57 +18,51 @@ mkOpts (Arr opts) =
       "<option value=\"" ++ toStr o ++ ".lst\">" ++ toStr o ++ "</option>"
 
 main = do
+  (pstart, start) <- pipe ()
+  (pnewQ, newQ) <- pipe ()
+  dictList <- jsonSig (pure "api.cgi") ([] <$ start)
   dictName <- valueOf "dictList"
   answer <- valueOf "answer"
-  (qaPipe, qAndA) <- pipe ("","")
-  (tryPipe, tries) <- pipe (3 :: Int)
-  (failPipe, failures) <- pipe []
-  (kickoffPipe, kickoff) <- pipe ()
-  let dict = mkDict <$> ajaxSig (("dicts/"++) <$> dname) (pure [])
-      dname = kickoff `triggers` initially "default" dictName
-  
-      newQA dict True _ = getQA dict
-      newQA dict _   qa = return qa
-  
-      getQA d = do
-        wordIndex <- randomIO (0, length d-1)
-        return (d !! wordIndex)
-        
-      correct =
-        initially False $ buffered $ (==) <$> buffered (snd <$> qAndA) <*> answer
+  let dictpath = ("dicts/"++) <$> (dictName `union` ("hiragana.lst" <$ start))
+  dict <- fmap mkDict <$> ajaxSig dictpath (pure [])
 
-      answerColors =
-        (\ok ts -> if ok || ts == 3 then "" else "wrong") <$> correct <*> tries
-      
-      triesLeft _   3             = ""
-      triesLeft qa x | x <= 0    = snd qa
-                     | otherwise = show_ x ++ " tries left"
-      
-      moreFail = addFail <$> initially [] (buffered failures)
-                         <*> initially ("","") (buffered qAndA)
-                         <*> tries
-        where
-          addFail fs cur 0 = cur:fs
-          addFail fs _   _ = fs
-  
-  qaPipe << answer `triggers`
-              (perform (newQA <$> dict <*> correct <*> buffered qAndA))
-  qaPipe << perform (getQA <$> dict)
-  tryPipe << answer `triggers` ((\x -> x - 1) <$> buffered tries)
-  tryPipe << lazy qAndA `triggers` pure 3
-  failPipe << moreFail
-  
-  domObj "dictList.innerHTML" <<
-    mkOpts <$> jsonSig (pure "api.cgi") (kickoff `triggers` pure [])  
+  qaIndex <- async
+               $   (\d p -> randomIO (0, length d-1) >>= write p)
+               <$> dict
+               <*  newQ
+  let qAndA = (| dict !! qaIndex |)
+      isGuess = (False <$ qAndA) `union` (True <$ answer)
+      correct = fmap fst
+              $ filterS snd
+              $ zipS (| (snd <$> qAndA) == answer |) isGuess
+
+      resetTries = (| correct || (not <$> isGuess) |)
+      triesLeft = filterS (>= 0) $ accumS 3 (updateTries <$> resetTries)
+      updateTries True = const (3 :: Int)
+      updateTries _    = subtract 1
+
+      problems = accumS [] (| addProblem qAndA triesLeft isGuess answer |)
+      addProblem _ 3 _ _ =
+        id
+      addProblem (q,a) 2 True (_:_) = \xs ->
+        (q,a,"correctAfterFirstGuess") : xs
+      addProblem (q,a) n True ans = \xs ->
+        case xs of
+          (pq,_,_):xs' | pq == q -> (q,a,"wrong") : xs'
+          _                      -> (q,a,"wrong") : xs
+      showNewProblem = (True <$ qAndA) `union` (False <$ answer)
+      visibleProbs = fmap fst $ filterS snd $ zipS problems showNewProblem
+
+  domObj "dictList.innerHTML" << mkOpts <$> dictList
   domObj "question.innerHTML" << fst <$> qAndA
-  domObj "question.className" << answerColors
-  domObj "question.className" << qAndA `triggers` pure ""
-  domObj "hint.innerHTML" << triesLeft <$> qAndA <*> tries
-  domObj "answer.value" << answer `triggers` pure ""
-  domObj "problems.innerHTML" << showList <$> failures
-  push () kickoffPipe
+  domObj "hint.innerHTML" << formatTries <$> triesLeft
+  domObj "answer.value" << "" <$ answer
+  domObj "problems.innerHTML" << showList <$> visibleProbs
+  pnewQ << () <$ filterS id correct
+  write pstart ()
   where
-    showList =
-      concat .
-      map (\(k,v) -> "<div class=\"wrong\">" ++ k ++ " is " ++ v ++ "</div>") .
-      reverse
+    formatTries n = if n == 3 then "" else show n ++ " tries left"
+    showList = concat
+             . map
+                (\(k,v,c) -> "<div class=\""++c++"\">"++k++" is "++v++"</div>")
+             . reverse
