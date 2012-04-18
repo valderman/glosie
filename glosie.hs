@@ -31,9 +31,7 @@ main = do
 
   let qAndA = (| dict !! qaIndex |)
       isGuess = (False <$ qAndA) `union` (True <$ answer)
-      correct = fmap fst
-              $ filterS snd
-              $ zipS (| (snd <$> qAndA) == answer |) isGuess
+      correct = whenS isGuess (|(snd <$> qAndA) == answer|)
 
       resetTries = (| correct || (not <$> isGuess) |)
       triesLeft = filterS (>= 0) $ accumS 3 (updateTries <$> resetTries)
@@ -53,8 +51,7 @@ main = do
         case xs of
           (pq,_,_):xs' | pq == q -> (q,a,"wrong") : xs'
           _                      -> (q,a,"wrong") : xs
-      showNewProblem = (True <$ qAndA) `union` (False <$ answer)
-      visibleProbs = fmap fst $ filterS snd $ zipS problems showNewProblem
+      visibleProbs = whenS ((True <$ qAndA) `union` (False <$ answer)) problems
 
   domObj "dictList.innerHTML" << mkOpts <$> dictList
   domObj "question.innerHTML" << fst <$> qAndA
