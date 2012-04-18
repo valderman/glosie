@@ -55,7 +55,7 @@ main = do
 
   domObj "dictList.innerHTML" << mkOpts <$> dictList
   domObj "question.innerHTML" << fst <$> qAndA
-  domObj "hint.innerHTML" << formatTries <$> triesLeft
+  domObj "hint.innerHTML" << formatTries <$> triesLeft <*> qAndA
   domObj "answer.value" << "" <$ answer
   domObj "problems.innerHTML" << showList <$> visibleProbs
   domObj "stats.innerHTML" << formatPerc <$> tries
@@ -63,7 +63,9 @@ main = do
   write pstart ()
   where
     formatPerc (good,tot) = show_ (round_ $ (good/tot)*100) ++ " % correct"
-    formatTries n = if n == 3 then "" else show n ++ " tries left"
+    formatTries 3 _  = ""
+    formatTries 0 qa = snd qa
+    formatTries n _  = show n ++ " tries left"
     showList = concat
              . map
                 (\(k,v,c) -> "<div class=\""++c++"\">"++k++" is "++v++"</div>")
