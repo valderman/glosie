@@ -39,8 +39,6 @@ initState = State {
     problems = []
   }
 
-data Evt = Guess String | NewDict [(String, String)]
-
 newQ q = do
   setProp "question" "innerHTML" q
   setProp "hint" "innerHTML" ""
@@ -55,28 +53,32 @@ reportSuccess probs q good tot = do
                 (\(k,v,c) -> "<div class=\""++c++"\">"++k++" is "++v++"</div>")
              . reverse
 
-handleEvt :: Evt -> State -> (State, IO ())
-handleEvt (NewDict d) st =
+onNewDict d st =
   (st {dict = d, curQuestion = q, curAnswer = a, seed = seed', triesLeft = 3},
    newQ q)
   where
     (newIx, seed') = randomR (0, length d) (seed st)
     (q,a) = d !! newIx
-handleEvt (Guess guess) st
-  | guess == curAnswer st =
-    (st {correctTries = corr,
-         totalTries = tot,
-         curQuestion = q,
-         curAnswer = a,
-         seed = seed',
-         triesLeft = 3},
-     reportSuccess (problems st) q corr tot)
-  | otherwise =
+
+onGuess guess st
+  | guess == curAnswer st = goodGuess
+  | otherwise             = badGuess
+  where
+    goodGuess =
+      (st {correctTries = corr,
+           totalTries = tot,
+           curQuestion = q,
+           curAnswer = a,
+           seed = seed',
+           triesLeft = 3},
+       reportSuccess (problems st) q corr tot)
+
+    badGuess =
       (st {triesLeft = tries,
            totalTries = newTotal,
            problems = probs},
        setProp "hint" "innerHTML" hint)
-  where
+
     (corr, tot) | triesLeft st == 3 = (correctTries st+1,totalTries st+1)
                 | otherwise         = (correctTries st, totalTries st)
     (newIx, seed') = randomR (0, length $ dict st) (seed st)
@@ -105,8 +107,8 @@ main = do
       dictpath = (| pure "dicts/" ++ (dictName `union` initialDict) |)
   dict <- fmap mkDict <$> ajaxSig dictpath (pure [])
   
-  let evts = unions [Guess <$> answer, NewDict <$> dict]
-      acts = stateful (initState, return ()) (handleEvt <$> evts)
+  let evts = unions [onGuess <$> answer, onNewDict <$> dict]
+      acts = stateful (initState, return ()) evts
 
   domObj "dictList.innerHTML" << mkOpts <$> dictList
   domObj "answer.value" << ("" <$ answer)
