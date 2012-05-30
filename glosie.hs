@@ -2,6 +2,7 @@
 module Main where
 import Control.Applicative
 import Haste
+import Haste.DOM
 import Haste.JSON
 import Haste.Reactive
 import System.IO.Unsafe
@@ -40,13 +41,15 @@ initState = State {
   }
 
 newQ q = do
-  setProp "question" "innerHTML" q
-  setProp "hint" "innerHTML" ""
+  withElem "question" $ \e -> setProp e "innerHTML" q
+  withElem "hint" $ \e -> setProp e "innerHTML" ""
 
 reportSuccess probs q good tot = do
   newQ q
-  setProp "stats" "innerHTML" $ show_ (round_ $ (good/tot)*100) ++ " % correct"
-  setProp "problems" "innerHTML" (showList probs)
+  withElem "stats" $ \e ->
+    setProp e "innerHTML" $ show_ (round_ $ (good/tot)*100) ++ " % correct"
+  withElem "problems" $ \e ->
+    setProp e "innerHTML" (showList probs)
   where
     showList = concat
              . map
@@ -77,7 +80,7 @@ onGuess guess st
       (st {triesLeft = tries,
            totalTries = newTotal,
            problems = probs},
-       setProp "hint" "innerHTML" hint)
+       withElem "hint" $ \e -> setProp e "innerHTML" hint)
 
     (corr, tot) | triesLeft st == 3 = (correctTries st+1,totalTries st+1)
                 | otherwise         = (correctTries st, totalTries st)
@@ -110,7 +113,7 @@ main = do
   let evts = unions [onGuess <$> answer, onNewDict <$> dict]
       acts = stateful (initState, return ()) evts
 
-  domObj "dictList.innerHTML" << mkOpts <$> dictList
-  domObj "answer.value" << ("" <$ answer)
+  elemProp "dictList.innerHTML" << mkOpts <$> dictList
+  elemProp "answer.value" << ("" <$ answer)
   sink id acts
   write pstart ()
