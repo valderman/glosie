@@ -1,119 +1,79 @@
-{-# OPTIONS_GHC -F -pgmF she #-}
-module Main where
+import Haste.App
+import Haste.App.Concurrent
+import Haste.Serialize
+import System.Directory
+import Control.Monad
 import Control.Applicative
-import Haste
-import Haste.DOM
-import Haste.JSON
-import Haste.Reactive
-import System.IO.Unsafe
 
-mkDict :: String -> [(String, String)]
-mkDict = map (\str -> let (v,k) = span (/=':') str in (drop 1 k, v)) . lines
+data Event = AnswerOK Double | NewDict [(String, String)]
+data AnswerEvent = Answer String | Die
 
-mkOpts :: JSON -> String
-mkOpts (Arr opts) =
-  title ++ concat (map toOpt opts)
-  where
-    title = "<option disabled>Choose a dictionary</option>"
-    toOpt (Str o) =
-      "<option value=\"" ++ toStr o ++ ".lst\">" ++ toStr o ++ "</option>"
+main = runApp (defaultConfig "ws://localhost:24601" 24601) $ do
+  listDicts <- export . liftIO $ do
+    files <- getDirectoryContents "dicts"
+    return [takeWhile (/= '.') d | d <- files, head d /= '.', d /= "default"]
 
-data State = State {
-    totalTries   :: Double,
-    correctTries :: Double,
-    triesLeft    :: Int,
-    curQuestion  :: String,
-    curAnswer    :: String,
-    dict         :: [(String, String)],
-    seed         :: Seed,
-    problems     :: [(String, String, String)]
-  }
+  getDict <- export $ liftIO . readFile . ("dicts/" ++) . filter (/= '/')
 
-initState = State {
-    totalTries = 0,
-    correctTries = 0,
-    triesLeft = 3,
-    curQuestion = "",
-    curAnswer = "",
-    dict = [],
-    seed = unsafePerformIO $ newSeed,
-    problems = []
-  }
+  let ids = ["hint", "question", "stats", "problems", "dictList", "answer"]
+  runClient $ withElems ids  $ \[hint,q,stats,problems,dictList,ans] -> do
+    ds <- onServer listDicts
+    d <- parse <$> onServer (getDict <.> "hiragana.lst")
+    s <- newSeed
+    clearChildren dictList
+    forM_ ds $ \d -> do
+      e <- newElem "option"
+      setProp e "innerText" d
+      setProp e "value" $ d ++ ".lst"
+      addChild e dictList
 
-newQ q = do
-  withElem "question" $ \e -> setProp e "innerHTML" q
-  withElem "hint" $ \e -> setProp e "innerHTML" ""
+    ansvar <- newEmptyMVar
+    ans `onEvent` OnKeyPress $ \13 -> do
+      getProp ans "value" >>= putMVar ansvar . Answer
+      setProp ans "value" ""
 
-reportSuccess probs q good tot = do
-  newQ q
-  withElem "stats" $ \e ->
-    setProp e "innerHTML" $ show_ (round_ $ (good/tot)*100) ++ " % correct"
-  withElem "problems" $ \e ->
-    setProp e "innerHTML" (showList probs)
-  where
-    showList = concat
-             . map
-                (\(k,v,c) -> "<div class=\""++c++"\">"++k++" is "++v++"</div>")
-             . reverse
+    evt <- newEmptyMVar
+    dictList `onEvent` OnChange $ do
+      newdict <- getProp dictList "value" >>= \d -> onServer (getDict <.> d)
+      putMVar evt $ NewDict $ parse newdict
 
-onNewDict d st =
-  (st {dict = d, curQuestion = q, curAnswer = a, seed = seed', triesLeft = 3},
-   newQ q)
-  where
-    (newIx, seed') = randomR (0, length d) (seed st)
-    (q,a) = d !! newIx
+    let ask d s ok wrong = do
+          let (ix, s') = randomR (0, length d) s
+              p@(question, answer) = d !! ix
+              st = show (convert $ ok*100/(ok+wrong) :: Int) ++ " % correct"
+          when (ok > 0) $ setProp stats "innerText" st
+          setProp q "innerText" question
+          fork $ answerLoop 0 answer
+          event <- takeMVar evt
+          case event of
+            AnswerOK wrongTries -> do
+              let c = if wrongTries==1 then "correctAfterFirstGuess" else "wrong"
+              when (wrongTries > 0) $ do
+                e <- newElem "div"
+                setProp e "innerText" $ question ++ " is " ++ answer
+                setProp e "className" c
+                addChild e problems
+              ask d s' (ok+1) (wrong+wrongTries)
+            NewDict d' -> do
+              putMVar ansvar Die
+              ask d' s' ok wrong
 
-onGuess guess st
-  | guess == curAnswer st = goodGuess
-  | otherwise             = badGuess
-  where
-    goodGuess =
-      (st {correctTries = corr,
-           totalTries = tot,
-           curQuestion = q,
-           curAnswer = a,
-           seed = seed',
-           triesLeft = 3},
-       reportSuccess (problems st) q corr tot)
+        answerLoop tries answer = do
+          a <- takeMVar ansvar
+          case a of
+            Answer answer'
+              | answer' == answer -> do
+                setStyle q "color" "black"
+                setProp hint "innerText" ""
+                putMVar evt $ AnswerOK tries
+              | otherwise -> do
+                setStyle q "color" "red"
+                when (tries > 1) $ setProp hint "innerText" answer
+                answerLoop (tries+1) answer
+            Die -> return ()
+    ask d s 0 0
 
-    badGuess =
-      (st {triesLeft = tries,
-           totalTries = newTotal,
-           problems = probs},
-       withElem "hint" $ \e -> setProp e "innerHTML" hint)
-
-    (corr, tot) | triesLeft st == 3 = (correctTries st+1,totalTries st+1)
-                | otherwise         = (correctTries st, totalTries st)
-    (newIx, seed') = randomR (0, length $ dict st) (seed st)
-    (q,a) = dict st !! newIx
-      
-    tries = max 0 (triesLeft st - 1)
-    hint | tries > 0 = show tries ++ " tries left"
-         | otherwise = "The answer is " ++ curAnswer st
-    newTotal | tries == 2 = totalTries st+1
-             | otherwise  = totalTries st
-    probs
-      | tries == 2 =
-        (curQuestion st, curAnswer st, "correctAfterFirstGuess") : problems st
-      | otherwise =
-        case problems st of
-          ((k,v,_):ps) -> (k,v,"wrong"):ps
-          _            -> []
-
-main = do
-  (pstart, start) <- pipe ()
-  dictList <- jsonSig (pure "api.cgi") ([] <$ start)
-  dictName <- valueOf "dictList"
-  answer <- valueOf "answer"
-
-  let initialDict = ("hiragana.lst" <$ start)
-      dictpath = (| pure "dicts/" ++ (dictName `union` initialDict) |)
-  dict <- fmap mkDict <$> ajaxSig dictpath (pure [])
-  
-  let evts = unions [onGuess <$> answer, onNewDict <$> dict]
-      acts = stateful (initState, return ()) evts
-
-  elemProp "dictList.innerHTML" << mkOpts <$> dictList
-  elemProp "answer.value" << ("" <$ answer)
-  sink id acts
-  write pstart ()
+parse :: String -> [(String, String)]
+parse = map go . lines
+  where go s = case span (/= ':') s of
+                 (a, _:q) -> (q, a)
