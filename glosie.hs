@@ -1,5 +1,7 @@
 import Haste.App
 import Haste.App.Concurrent
+import Haste.DOM
+import Haste.Events
 import Haste.Serialize
 import System.Directory
 import Control.Monad
@@ -8,12 +10,12 @@ import Control.Applicative
 data Event = AnswerOK Double | NewDict [(String, String)]
 data AnswerEvent = Answer String | Die
 
-main = runApp (defaultConfig "ws://localhost:24601" 24601) $ do
-  listDicts <- export . liftIO $ do
+main = runApp (mkConfig "localhost" 24601) $ do
+  listDicts <- remote . liftIO $ do
     files <- getDirectoryContents "dicts"
     return [takeWhile (/= '.') d | d <- files, head d /= '.', d /= "default"]
 
-  getDict <- export $ liftIO . readFile . ("dicts/" ++) . filter (/= '/')
+  getDict <- remote $ liftIO . readFile . ("dicts/" ++) . filter (/= '/')
 
   let ids = ["hint", "question", "stats", "problems", "dictList", "answer"]
   runClient $ withElems ids  $ \[hint,q,stats,problems,dictList,ans] -> do
@@ -28,12 +30,12 @@ main = runApp (defaultConfig "ws://localhost:24601" 24601) $ do
       addChild e dictList
 
     ansvar <- newEmptyMVar
-    ans `onEvent` OnKeyPress $ \13 -> do
+    ans `onEvent` KeyPress $ \13 -> do
       getProp ans "value" >>= putMVar ansvar . Answer
       setProp ans "value" ""
 
     evt <- newEmptyMVar
-    dictList `onEvent` OnChange $ do
+    dictList `onEvent` Change $ \_ -> do
       newdict <- getProp dictList "value" >>= \d -> onServer (getDict <.> d)
       putMVar evt $ NewDict $ parse newdict
 
